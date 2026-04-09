@@ -18,6 +18,7 @@ Single Process Actor
 import itertools
 import logging
 import os
+import time
 from typing import Tuple
 
 import torch
@@ -279,8 +280,19 @@ class DataParallelPPOActor(BasePPOActor):
             dataloader = batch.split(self.config.ppo_mini_batch_size)
 
         metrics = {}
+        _is_rank0 = not torch.distributed.is_initialized() or torch.distributed.get_rank() == 0
+        _total_mini_batches = len(dataloader) if hasattr(dataloader, "__len__") else "?"
+        _update_start = time.perf_counter()
         for epoch in range(self.config.ppo_epochs):
             for batch_idx, data in enumerate(dataloader):
+                _mini_batch_start = time.perf_counter()
+                if _is_rank0:
+                    print(
+                        f"[ActorUpdate] epoch={epoch}/{self.config.ppo_epochs} "
+                        f"mini_batch={batch_idx+1}/{_total_mini_batches} "
+                        f"elapsed={time.perf_counter()-_update_start:.1f}s",
+                        flush=True,
+                    )
                 # split batch into micro_batches
                 mini_batch = data
                 if has_multi_modal_inputs:
@@ -392,14 +404,24 @@ class DataParallelPPOActor(BasePPOActor):
                     loss.backward()
 
                     data = {
-                        "actor/pg_loss": pg_loss.detach().item(),
+                        "actor/pg_loss": pg_loss.detach().item(),  # CUDA sync point
                         "actor/pg_clipfrac": pg_clipfrac.detach().item(),
                         "actor/ppo_kl": ppo_kl.detach().item(),
                         "actor/pg_clipfrac_lower": pg_clipfrac_lower.detach().item(),
                     }
                     append_to_dict(metrics, data)
 
+                _fwd_bwd_time = time.perf_counter() - _mini_batch_start
                 grad_norm = self._optimizer_step()
+                _opt_time = time.perf_counter() - _mini_batch_start - _fwd_bwd_time
+                if _is_rank0:
+                    print(
+                        f"[ActorUpdate] epoch={epoch}/{self.config.ppo_epochs} "
+                        f"mini_batch={batch_idx+1}/{_total_mini_batches} done | "
+                        f"fwd+bwd={_fwd_bwd_time:.1f}s  opt_step={_opt_time:.1f}s  "
+                        f"total_elapsed={time.perf_counter()-_update_start:.1f}s",
+                        flush=True,
+                    )
                 data = {"actor/grad_norm": grad_norm.detach().item()}
             append_to_dict(metrics, data)
         self.actor_optimizer.zero_grad()

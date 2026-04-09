@@ -6,7 +6,7 @@ ulimit -n 65535
 #################### 参数区（只需在这里修改参数） ####################
 EXP_LOG_NAME="ReMemR1_3B"
 
-N_NODE=2 # set to 1 for single node training
+N_NODE=1 # set to 1 for single node training
 N_GPU=8
 
 # Training Setting
@@ -18,14 +18,14 @@ ROLLOUT_VAL_N=4
 ALPHA=0.8
 
 TRAIN_BS=128
-PPO_MINI_BS=8
+PPO_MINI_BS=32
 METRIC_NAME=em
 
 
 PROJ_ROOT=`pwd`
 STORAGE_ROOT="$PROJ_ROOT"
-MODEL_PATH="Qwen/Qwen2.5-3B-Instruct"
-DATASET_ROOT="${STORAGE_ROOT}/data/train"
+MODEL_PATH="/home/tione/notebook/gaozhenkun/model/Qwen2.5-3B-Instruct"
+DATASET_ROOT="/home/tione/notebook/gaozhenkun/hzh/data/hotpotqa"
 
 export EXP=memory_agent/$EXP_LOG_NAME
 export PROJ_DIR="$STORAGE_ROOT/results/${EXP}"
@@ -63,7 +63,7 @@ python3 -m verl.trainer.main_ppo \
     trainer.save_best_val=true \
     actor_rollout_ref.rollout.n=$ROLLOUT_N \
     actor_rollout_ref.rollout.val_kwargs.n=$ROLLOUT_VAL_N \
-    trainer.logger=['console','wandb'] \
+    trainer.logger=['console','tensorboard'] \
     actor_rollout_ref.actor.optim.lr_warmup_steps=20 \
     actor_rollout_ref.actor.clip_ratio_high=0.20 \
     actor_rollout_ref.actor.entropy_coeff=0.000 \
@@ -91,15 +91,15 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.actor.kl_loss_type=low_var_kl \
     actor_rollout_ref.model.enable_gradient_checkpointing=True \
     actor_rollout_ref.actor.fsdp_config.param_offload=True \
-    actor_rollout_ref.actor.fsdp_config.optimizer_offload=True \
+    actor_rollout_ref.actor.fsdp_config.optimizer_offload=False \
     actor_rollout_ref.rollout.enforce_eager=False \
-    actor_rollout_ref.rollout.free_cache_engine=False \
+    actor_rollout_ref.rollout.free_cache_engine=True \
     actor_rollout_ref.actor.fsdp_config.fsdp_size=8 \
     actor_rollout_ref.rollout.name=sglang \
     actor_rollout_ref.rollout.temperature=1 \
     actor_rollout_ref.rollout.top_p=0.999 \
     actor_rollout_ref.rollout.tensor_model_parallel_size=1 \
-    actor_rollout_ref.rollout.gpu_memory_utilization=0.6 \
+    actor_rollout_ref.rollout.gpu_memory_utilization=0.8 \
     actor_rollout_ref.rollout.val_kwargs.do_sample=True \
     actor_rollout_ref.rollout.val_kwargs.temperature=1.0 \
     actor_rollout_ref.rollout.val_kwargs.top_p=0.7 \
