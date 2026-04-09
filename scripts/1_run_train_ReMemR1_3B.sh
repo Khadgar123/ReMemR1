@@ -37,9 +37,6 @@ export TRAIN_PATH="${DATASET_ROOT}/hotpotqa_train_32k.parquet"
 ##########################################
 
 PYTHONPATH=$PROJ_ROOT
-export WANDB_API_KEY="YOURE_WANDB_TOKEN"
-export WANDB_PROJECT="your_wandb_project"
-wandb online
 
 mkdir -p $PROJ_DIR
 mkdir -p $ROLLOUT_DIR
@@ -109,7 +106,7 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.ref.fsdp_config.param_offload=True \
     algorithm.kl_ctrl.kl_coef=0.001 \
     trainer.critic_warmup=0 \
-    trainer.project_name=$WANDB_PROJECT \
+    trainer.project_name=$EXP_LOG_NAME \
     trainer.experiment_name=$EXP_LOG_NAME \
     trainer.val_before_train=true \
     trainer.n_gpus_per_node=$N_GPU \

@@ -4,33 +4,27 @@ set -x
 # at least 1 nodes, 4nodes=3~4days to converge
 NNODES=1
 NGPUS_PER_NODE=8
-PROJ_ROOT="/mnt/finder/shiyr/code/Mem/MemAgent/results"
-DATASET_ROOT="/mnt/finder/shiyr/code/Mem/MemAgent/data"
 
+PROJ_ROOT=`pwd`
+DATASET_ROOT="/home/tione/notebook/gaozhenkun/hzh/data/hotpotqa"
+MODEL_PATH="/home/tione/notebook/gaozhenkun/model/Qwen2.5-1.5B-Instruct"
 
-wandb_token="8c63841d0875e4fde65a42fb47b52e6a18b8a1ed"
-export WANDB_MODE="disabled"
-wandb offline
-export WANDB_BASE_URL="https://api.wandb-cn.top"
-export WANDB_API_KEY=$wandb_token
-export WANDB_PROJECT="memory-agent"
-
-# MODEL_PATH=Qwen/Qwen2.5-1.5B-Instruct
-export HF_ENDPOINT="https://hf-mirror.com"
-MODEL_PATH="Qwen/Qwen2.5-1.5B-Instruct"
-VAL_PATH="${DATASET_ROOT}/hotpotqa/hotpotqa_dev.parquet"
-TRAIN_PATH="${DATASET_ROOT}/hotpotqa/hotpotqa_train_32k.parquet"
+VAL_PATH="${DATASET_ROOT}/hotpotqa_dev.parquet"
+TRAIN_PATH="${DATASET_ROOT}/hotpotqa_train_32k.parquet"
 EXP_LOG_NAME=memory_agent_debug
 EXP=memory_agent/$EXP_LOG_NAME
-PROJ_DIR=${PROJ_ROOT}/${EXP}
-export PYTHONPATH="/mnt/finder/shiyr/code/Mem/MemAgent:$PYTHONPATH"
+PROJ_DIR="${PROJ_ROOT}/results/${EXP}"
+export PYTHONPATH="${PROJ_ROOT}:$PYTHONPATH"
+
+mkdir -p $PROJ_DIR
+mkdir -p $PROJ_ROOT/log
 
 # Please note that recurrent framewrok will use max_length defined in task config.
 # These two values are just for vLLM to decide max_model_length.
 MAXLEN=8192 
 MAX_NEW_TOKEN=1024
 
-LOG_PATH="/mnt/finder/shiyr/code/Mem/MemAgent/log/$EXP_LOG_NAME.log"
+LOG_PATH="$PROJ_ROOT/log/$EXP_LOG_NAME.log"
 python3 -m verl.trainer.main_ppo \
     recurrent.enable=memory \
     recurrent.memory.config.chunk_size=5000 \
@@ -39,7 +33,7 @@ python3 -m verl.trainer.main_ppo \
     trainer.save_freq=50 \
     actor_rollout_ref.rollout.n=4 \
     actor_rollout_ref.rollout.val_kwargs.n=4 \
-    trainer.logger=['console','wandb'] \
+    trainer.logger=['console','tensorboard'] \
     actor_rollout_ref.actor.optim.lr_warmup_steps=20 \
     actor_rollout_ref.actor.clip_ratio_high=0.20 \
     actor_rollout_ref.actor.entropy_coeff=0.000 \
@@ -86,7 +80,7 @@ python3 -m verl.trainer.main_ppo \
     +actor_rollout_ref.ref.fsdp_config.model_dtype="bf16" \
     algorithm.kl_ctrl.kl_coef=0.001 \
     trainer.critic_warmup=0 \
-    trainer.project_name=$WANDB_PROJECT \
+    trainer.project_name=$EXP_LOG_NAME \
     trainer.experiment_name=${EXP} \
     trainer.val_before_train=false \
     trainer.n_gpus_per_node=$NGPUS_PER_NODE \

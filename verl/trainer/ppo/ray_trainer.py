@@ -16,6 +16,7 @@ FSDP PPO Trainer with Ray-based single controller.
 This trainer supports model-agonistic model initialization with huggingface
 """
 
+import datetime
 import json
 import os
 import shutil
@@ -27,6 +28,10 @@ from dataclasses import dataclass, field
 from enum import Enum
 from pprint import pprint
 from typing import Dict, Type
+
+
+def _now():
+    return datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
 import numpy as np
 import ray
@@ -1122,7 +1127,9 @@ class RayPPOTrainer:
                             batch = batch.repeat(repeat_times=self.config.actor_rollout_ref.rollout.n, interleave=True)
                             gen_batch = gen_batch.repeat(repeat_times=self.config.actor_rollout_ref.rollout.n, interleave=True)
 
+                            print(f"[Trainer|{_now()}] run_llm_loop_revisit START", flush=True)
                             gen_batch_output, final_mask, sample_index = self.generation_manager.run_llm_loop_revisit(gen_batch, timing_raw)
+                            print(f"[Trainer|{_now()}] run_llm_loop_revisit DONE  gen_size={len(gen_batch_output)}", flush=True)
 
                             assert final_mask.sum().item() == len(batch.batch), \
                                 "The number of final responses should be equal to the number of prompts." \
@@ -1164,7 +1171,9 @@ class RayPPOTrainer:
                     #######
 
                     # compute global_valid tokens
+                    print(f"[Trainer|{_now()}] global_token_num compute START", flush=True)
                     batch.meta_info["global_token_num"] = torch.sum(batch.batch["attention_mask"], dim=-1).tolist()
+                    print(f"[Trainer|{_now()}] global_token_num compute DONE  batch_size={len(batch)}", flush=True)
 
                     with _timer("reward", timing_raw):
                         # compute reward model score
@@ -1179,11 +1188,15 @@ class RayPPOTrainer:
                                 reward_tensor, reward_extra_infos_dict = compute_reward(batch, self.reward_fn)
                         else:
                             from recurrent.utils import final_batch
+                            print(f"[Trainer|{_now()}] final_batch+compute_reward START  gen_size={len(batch)}", flush=True)
                             ##### make sure that samples in indexed proto are in same order as original_batch
                             reward_batch = final_batch(batch, final_mask, sample_index).union(original_batch)
                             reward_tensor, reward_extra_infos_dict = compute_reward(reward_batch, self.reward_fn)
+                            print(f"[Trainer|{_now()}] final_batch+compute_reward DONE", flush=True)
                             # pad for log_prob
+                            print(f"[Trainer|{_now()}] pad_dataproto_to_divisor START  batch_size={len(batch)}", flush=True)
                             batch, pad_size = pad_dataproto_to_divisor(batch, self.actor_rollout_wg.world_size)
+                            print(f"[Trainer|{_now()}] pad_dataproto_to_divisor DONE   pad_size={pad_size}  new_batch_size={len(batch)}", flush=True)
                             
                     if self.config.recurrent.enable and self.config.algorithm.get("filter_groups", None):  
                         # NOTE: When prompts after filtering is less than train batch size,
@@ -1213,6 +1226,7 @@ class RayPPOTrainer:
                         metrics["train/kept_samples"] = len(kept_traj_idxs)
 
                     # recompute old_log_probs
+                    print(f"[Trainer|{_now()}] >>> STEP old_log_prob START  (batch_size={len(batch)})", flush=True)
                     with _timer("old_log_prob", timing_raw):
                         old_log_prob = self.actor_rollout_wg.compute_log_prob(batch)
                         entropys = old_log_prob.batch["entropys"]
@@ -1223,20 +1237,25 @@ class RayPPOTrainer:
                         metrics.update(old_log_prob_metrics)
                         old_log_prob.batch.pop("entropys")
                         batch = batch.union(old_log_prob)
+                    print(f"[Trainer|{_now()}] >>> STEP old_log_prob DONE   cost={timing_raw.get('old_log_prob', 0):.1f}s", flush=True)
 
                     if self.use_reference_policy:
                         # compute reference log_prob
+                        print(f"[Trainer|{_now()}] >>> STEP ref_log_prob START", flush=True)
                         with _timer("ref", timing_raw):
                             ref_log_prob = self.ref_policy_wg.compute_ref_log_prob(batch)
                             batch = batch.union(ref_log_prob)
+                        print(f"[Trainer|{_now()}] >>> STEP ref_log_prob DONE   cost={timing_raw.get('ref', 0):.1f}s", flush=True)
 
                     # compute values
                     if self.use_critic:
+                        print(f"[Trainer|{_now()}] >>> STEP compute_values START", flush=True)
                         with _timer("values", timing_raw):
                             values = self.critic_wg.compute_values(batch)
                             batch = batch.union(values)
+                        print(f"[Trainer|{_now()}] >>> STEP compute_values DONE   cost={timing_raw.get('values', 0):.1f}s", flush=True)
 
-
+                    print(f"[Trainer|{_now()}] >>> STEP adv START", flush=True)
                     with _timer('adv', timing_raw):
                         ###############
                         # ORIGINAL
@@ -1367,8 +1386,10 @@ class RayPPOTrainer:
                                 batch.batch['no_padding_mask'] = torch.ones(len(batch), dtype=torch.bool)
 
                         # update actor
+                        print(f"[Trainer|{_now()}] >>> STEP update_actor START  (batch_size={len(batch)})", flush=True)
                         with _timer("update_actor", timing_raw):
                             actor_output = self.actor_rollout_wg.update_actor(batch)
+                        print(f"[Trainer|{_now()}] >>> STEP update_actor DONE   cost={timing_raw.get('update_actor', 0):.1f}s", flush=True)
                         actor_output_metrics = reduce_metrics(actor_output.meta_info["metrics"])
                         metrics.update(actor_output_metrics)
 

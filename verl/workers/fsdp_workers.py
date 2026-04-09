@@ -600,8 +600,16 @@ class ActorRolloutRefWorker(Worker):
     @register(dispatch_mode=Dispatch.DP_COMPUTE_PROTO)
     def compute_log_prob(self, data: DataProto):
         assert self._is_actor
+        _rank0 = torch.distributed.get_rank() == 0
+        if _rank0:
+            print(f"[OldLogProb|{_now()}] ===== compute_log_prob START =====", flush=True)
+
         if self._is_offload_param:
-            load_fsdp_model_to_gpu(self.actor_module_fsdp)
+            _t = Timer(name="load_param", logger=None)
+            with _t:
+                load_fsdp_model_to_gpu(self.actor_module_fsdp)
+            if _rank0:
+                print(f"[OldLogProb|{_now()}] load_fsdp_model_to_gpu done  cost={_t.last:.1f}s", flush=True)
 
         # Support all hardwares
         data = data.to(torch.cuda.current_device())
@@ -613,7 +621,11 @@ class ActorRolloutRefWorker(Worker):
         # perform recompute log_prob
         with self.ulysses_sharding_manager:
             data = self.ulysses_sharding_manager.preprocess_data(data)
-            output, entropys = self.actor.compute_log_prob(data=data, calculate_entropy=True)
+            _t = Timer(name="fwd", logger=None)
+            with _t:
+                output, entropys = self.actor.compute_log_prob(data=data, calculate_entropy=True)
+            if _rank0:
+                print(f"[OldLogProb|{_now()}] forward done                cost={_t.last:.1f}s", flush=True)
             output = DataProto.from_dict(
                 tensors={"old_log_probs": output, "entropys": entropys},
                 meta_info={"temperature": self.config.rollout.temperature},
@@ -628,14 +640,23 @@ class ActorRolloutRefWorker(Worker):
             self.actor.actor_module._handle.reshard(True)
 
         if self._is_offload_param:
-            offload_fsdp_model_to_cpu(self.actor_module_fsdp)
+            _t = Timer(name="offload_param", logger=None)
+            with _t:
+                offload_fsdp_model_to_cpu(self.actor_module_fsdp)
+            if _rank0:
+                print(f"[OldLogProb|{_now()}] offload_fsdp_model done      cost={_t.last:.1f}s", flush=True)
             log_gpu_memory_usage("After offload actor model during compute_log_prob", logger=logger)
 
+        if _rank0:
+            print(f"[OldLogProb|{_now()}] ===== compute_log_prob END =====", flush=True)
         return output
 
     @register(dispatch_mode=Dispatch.DP_COMPUTE_PROTO)
     def compute_ref_log_prob(self, data: DataProto):
         assert self._is_ref
+        _rank0 = torch.distributed.get_rank() == 0
+        if _rank0:
+            print(f"[RefLogProb|{_now()}] ===== compute_ref_log_prob START =====", flush=True)
 
         # Support all hardwares
         data = data.to(torch.cuda.current_device())
@@ -647,7 +668,11 @@ class ActorRolloutRefWorker(Worker):
         data.meta_info["use_dynamic_bsz"] = self.config.ref.log_prob_use_dynamic_bsz
         with self.ulysses_sharding_manager:
             data = self.ulysses_sharding_manager.preprocess_data(data)
-            output, _ = self.ref_policy.compute_log_prob(data=data, calculate_entropy=False)
+            _t = Timer(name="fwd", logger=None)
+            with _t:
+                output, _ = self.ref_policy.compute_log_prob(data=data, calculate_entropy=False)
+            if _rank0:
+                print(f"[RefLogProb|{_now()}] forward done                cost={_t.last:.1f}s", flush=True)
             output = DataProto.from_dict(tensors={"ref_log_prob": output})
             output = self.ulysses_sharding_manager.postprocess_data(output)
 
@@ -658,6 +683,8 @@ class ActorRolloutRefWorker(Worker):
         if self.world_size > 1:
             self.ref_policy.actor_module._handle.reshard(True)
 
+        if _rank0:
+            print(f"[RefLogProb|{_now()}] ===== compute_ref_log_prob END =====", flush=True)
         return output
 
     @register(dispatch_mode=Dispatch.ONE_TO_ALL)

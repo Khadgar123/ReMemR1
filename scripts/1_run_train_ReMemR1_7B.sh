@@ -24,8 +24,8 @@ METRIC_NAME=em
 
 PROJ_ROOT=`pwd`
 STORAGE_ROOT="$PROJ_ROOT"
-MODEL_PATH="Qwen/Qwen2.5-7B-Instruct"
-DATASET_ROOT="${STORAGE_ROOT}/data/train"
+MODEL_PATH="/home/tione/notebook/gaozhenkun/model/Qwen2.5-7B-Instruct"
+DATASET_ROOT="/home/tione/notebook/gaozhenkun/hzh/data/hotpotqa"
 
 export EXP=memory_agent/$EXP_LOG_NAME
 export PROJ_DIR="$STORAGE_ROOT/results/${EXP}"
@@ -37,11 +37,10 @@ export TRAIN_PATH="${DATASET_ROOT}/hotpotqa_train_32k.parquet"
 ##########################################
 
 PYTHONPATH=$PROJ_ROOT
-export WANDB_API_KEY="YOURE_WANDB_TOKEN"
-export WANDB_PROJECT="your_wandb_project"
 
 mkdir -p $PROJ_DIR
 mkdir -p $ROLLOUT_DIR
+mkdir -p $PROJ_ROOT/log
 
 export VERL_LOGGING_LEVEL=INFO
 export HYDRA_FULL_ERROR=1
@@ -61,7 +60,7 @@ python3 -m verl.trainer.main_ppo \
     trainer.save_best_val=true \
     actor_rollout_ref.rollout.n=$ROLLOUT_N \
     actor_rollout_ref.rollout.val_kwargs.n=$ROLLOUT_VAL_N \
-    trainer.logger=['console','wandb'] \
+    trainer.logger=['console','tensorboard'] \
     actor_rollout_ref.actor.optim.lr_warmup_steps=20 \
     actor_rollout_ref.actor.clip_ratio_high=0.20 \
     actor_rollout_ref.actor.entropy_coeff=0.000 \
@@ -105,7 +104,7 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.ref.fsdp_config.param_offload=True \
     algorithm.kl_ctrl.kl_coef=0.001 \
     trainer.critic_warmup=0 \
-    trainer.project_name=$WANDB_PROJECT \
+    trainer.project_name=$EXP_LOG_NAME \
     trainer.experiment_name=$EXP_LOG_NAME \
     trainer.val_before_train=true \
     trainer.n_gpus_per_node=$N_GPU \
