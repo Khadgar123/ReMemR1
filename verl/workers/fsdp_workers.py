@@ -497,17 +497,34 @@ class ActorRolloutRefWorker(Worker):
         data = data.to(torch.cuda.current_device())
 
         assert self._is_actor
+        _rank0 = torch.distributed.get_rank() == 0
+
+        if _rank0:
+            print(f"[ActorUpdate|{_now()}] ===== update_actor START =====", flush=True)
+
         if self._is_offload_param:
-            load_fsdp_model_to_gpu(self.actor_module_fsdp)
+            _t = Timer(name="load_param", logger=None)
+            with _t:
+                load_fsdp_model_to_gpu(self.actor_module_fsdp)
+            if _rank0:
+                print(f"[ActorUpdate|{_now()}] load_fsdp_model_to_gpu done  cost={_t.last:.1f}s", flush=True)
         if self._is_offload_optimizer:
-            load_fsdp_optimizer(optimizer=self.actor_optimizer, device_id=torch.cuda.current_device())
+            _t = Timer(name="load_opt", logger=None)
+            with _t:
+                load_fsdp_optimizer(optimizer=self.actor_optimizer, device_id=torch.cuda.current_device())
+            if _rank0:
+                print(f"[ActorUpdate|{_now()}] load_fsdp_optimizer done     cost={_t.last:.1f}s", flush=True)
 
         with self.ulysses_sharding_manager:
             data = self.ulysses_sharding_manager.preprocess_data(data=data)
             # perform training
+            if _rank0:
+                print(f"[ActorUpdate|{_now()}] update_policy START", flush=True)
             with Timer(name="update_policy", logger=None) as timer:
                 metrics = self.actor.update_policy(data=data)
             delta_time = timer.last
+            if _rank0:
+                print(f"[ActorUpdate|{_now()}] update_policy done           cost={delta_time:.1f}s", flush=True)
             global_num_tokens = data.meta_info["global_token_num"]
             estimated_flops, promised_flops = self.flops_counter.estimate_flops(global_num_tokens, delta_time)
             metrics["perf/mfu/actor"] = estimated_flops * self.config.actor.ppo_epochs / promised_flops / self.world_size
@@ -526,12 +543,22 @@ class ActorRolloutRefWorker(Worker):
             output = output.to("cpu")
 
         if self._is_offload_param:
-            offload_fsdp_model_to_cpu(self.actor_module_fsdp)
+            _t = Timer(name="offload_param", logger=None)
+            with _t:
+                offload_fsdp_model_to_cpu(self.actor_module_fsdp)
+            if _rank0:
+                print(f"[ActorUpdate|{_now()}] offload_fsdp_model done      cost={_t.last:.1f}s", flush=True)
             log_gpu_memory_usage("After offload actor model during update_actor", logger=logger)
         if self._is_offload_optimizer:
-            offload_fsdp_optimizer(optimizer=self.actor_optimizer)
+            _t = Timer(name="offload_opt", logger=None)
+            with _t:
+                offload_fsdp_optimizer(optimizer=self.actor_optimizer)
+            if _rank0:
+                print(f"[ActorUpdate|{_now()}] offload_fsdp_optimizer done  cost={_t.last:.1f}s", flush=True)
             log_gpu_memory_usage("After offload actor optimizer during update_actor", logger=logger)
 
+        if _rank0:
+            print(f"[ActorUpdate|{_now()}] ===== update_actor END =====", flush=True)
         return output
 
     @register(dispatch_mode=Dispatch.DP_COMPUTE_PROTO)
